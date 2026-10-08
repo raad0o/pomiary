@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e2a400">
+<title>Karta pomiaru</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+/* Układ: lista pomiarów -> edytor. Na telefonie jedna kolumna, na PC edytor + panel kontroli obok. */
+:root{
+  --bg:#eceee9; --surface:#ffffff; --sunk:#f5f6f3; --fg:#1b201d; --muted:#59625b; --line:#d3d8d1;
+  --accent:#e2a400; --on-accent:#1d1a10; --accent-ink:#8a6400;
+  --crit:#b3261e; --crit-bg:#fbe9e7; --warn:#93600a; --warn-bg:#fdf3dc; --ok:#2c7445; --ok-bg:#e5f3e9;
+  --f-ui:system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --f-num:ui-monospace,"Cascadia Mono","Roboto Mono",Consolas,"Courier New",monospace;
+  --r:6px; color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#141715; --surface:#1c201d; --sunk:#181b19; --fg:#e6eae5; --muted:#9aa49c; --line:#30372f;
+  --accent:#f0b90b; --on-accent:#1d1a10; --accent-ink:#f0c64a;
+  --crit:#ff8a80; --crit-bg:#3a1d1a; --warn:#e8bb55; --warn-bg:#352a12; --ok:#7fd39a; --ok-bg:#16301f; color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:16px;line-height:1.45;
+  padding-inline:16px;padding-block:calc(16px + env(safe-area-inset-top,0px)) calc(72px + env(safe-area-inset-bottom,0px))}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1,h2,h3{margin:0;text-wrap:balance}
+h1{font-size:28px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:19px;font-weight:650}
+p{margin:0}
+.muted{color:var(--muted)}
+.tape{height:10px;border-radius:2px;background:
+  repeating-linear-gradient(90deg,var(--on-accent) 0 1px,transparent 1px 10px) bottom/100% 4px no-repeat,
+  repeating-linear-gradient(90deg,var(--on-accent) 0 1.5px,transparent 1.5px 50px) bottom/100% 8px no-repeat,var(--accent)}
+.topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,.btn{font:inherit;font-weight:600;font-size:15px;border-radius:var(--r);border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:9px 14px;cursor:pointer;min-height:44px;display:inline-flex;align-items:center;gap:6px}
+button:hover,.btn:hover{border-color:var(--muted)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.btn:focus-within{outline:3px solid var(--accent);outline-offset:1px}
+.primary{background:var(--accent)!important;color:var(--on-accent)!important;border-color:var(--accent)!important}
+.ghost{background:transparent}
+.small{min-height:36px;padding:5px 10px;font-size:14px;font-weight:500}
+.danger{color:var(--crit)}
+.btn input[type=file]{display:none}
+.banner{border-radius:var(--r);padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.banner.warn{background:var(--warn-bg)} .banner.crit{background:var(--crit-bg)} .banner.ok{background:var(--ok-bg)}
+
+/* Lista */
+.plist{display:flex;flex-direction:column;gap:8px}
+.pitem{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;cursor:pointer;text-align:left;width:100%;font-weight:400}
+.pitem strong{font-size:17px}
+.pitem .meta{grid-column:1;color:var(--muted);font-size:14px;font-family:var(--f-num)}
+.pitem .chip{grid-column:2;grid-row:1 / span 2}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:24px;text-align:center;color:var(--muted)}
+.chip{font-size:12.5px;font-weight:650;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.chip.crit{background:var(--crit-bg);color:var(--crit)} .chip.warn{background:var(--warn-bg);color:var(--warn)} .chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Edytor */
+.editor{display:grid;grid-template-columns:1fr;gap:20px;align-items:start}
+.main{display:flex;flex-direction:column;gap:20px;min-width:0}
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+@media (min-width:1000px){.editor{grid-template-columns:minmax(0,1fr) 380px}.side{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px}
+.checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.checklist li{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:var(--r);background:var(--sunk)}
+.lvl{font-size:11.5px;font-weight:750;text-transform:uppercase;letter-spacing:.07em}
+.lvl.crit{color:var(--crit)} .lvl.warn{color:var(--warn)} .lvl.info{color:var(--muted)} .lvl.ok{color:var(--ok)}
+section.step{display:flex;flex-direction:column;gap:12px}
+.step-head{display:flex;align-items:baseline;gap:10px;border-bottom:2px solid var(--fg);padding-bottom:6px}
+.step-head .no{font-family:var(--f-num);font-size:14px;color:var(--accent-ink)}
+.hint{color:var(--muted);font-size:14px;max-width:66ch}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px}
+.card-head{display:flex;gap:8px;align-items:center}
+.card-head input.name{flex:1;min-width:0;font-weight:650;font-size:17px}
+.card-head strong{flex:1}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 12px}
+.grid.wide{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);font-weight:550;min-width:0}
+input,select,textarea{font:inherit;font-size:16px;color:var(--fg);background:var(--sunk);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;width:100%;min-height:44px}
+textarea{min-height:80px;resize:vertical}
+.num{position:relative}
+.num input{font-family:var(--f-num);padding-right:42px;font-variant-numeric:tabular-nums}
+.num span{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-family:var(--f-num);font-size:13px;color:var(--muted);pointer-events:none}
+.calc{font-family:var(--f-num);font-size:14px;color:var(--muted);background:var(--sunk);border-radius:var(--r);padding:8px 10px}
+.calc b{color:var(--fg);font-weight:600}
+.calc:empty{display:none}
+.add{align-self:flex-start}
+.agd{display:flex;flex-direction:column;gap:6px}
+.agd-row{display:grid;grid-template-columns:minmax(0,210px) 1fr;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px}
+.tick{display:flex;gap:8px;align-items:center;font-weight:550;min-width:0}
+.tick input{width:22px;height:22px;min-height:0;accent-color:var(--accent);flex:none}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.photo{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}
+.photo img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:var(--sunk);cursor:zoom-in}
+.photo .pbody{padding:8px;display:flex;flex-direction:column;gap:6px}
+.pchecks{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:6px}
+.pchecks label{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px}
+.out textarea{font-family:var(--f-num);font-size:12.5px;min-height:220px;background:var(--surface)}
+.status{font-size:14px;color:var(--ok);min-height:1.3em}
+.viewer{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+.viewer img{max-width:100%;max-height:100%;object-fit:contain}
+.savebar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);
+  padding:8px 16px calc(8px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;align-items:center;justify-content:space-between;z-index:5}
+.savebar .st{font-size:13px;color:var(--muted);font-family:var(--f-num);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:540px){.agd-row{grid-template-columns:1fr} h1{font-size:24px}}
+@media print{
+  body{background:#fff;color:#000;padding:0}
+  .savebar,.actions,.add,button,.btn,.side .exp,.no-print,.out{display:none!important}
+  .editor{grid-template-columns:1fr}
+  input,select,textarea{border:none;background:none;padding:0;min-height:0}
+  .card,.panel,.photo{break-inside:avoid;border-color:#bbb}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- LISTA -->
+  <div id="vList" class="wrap" style="gap:16px">
+    <div class="tape" aria-hidden="true"></div>
+    <div class="topbar">
+      <h1>Pomiary</h1>
+      <div class="actions">
+        <button class="primary" id="btnNew" type="button">Nowy pomiar</button>
+        <label class="btn">Importuj plik<input type="file" id="importFile" accept=".json,application/json"></label>
+      </div>
+    </div>
+    <div class="banner warn" id="importBox" hidden></div>
+    <div class="banner warn" id="storageWarn" hidden>Przeglądarka może usunąć dane przy braku miejsca. Eksportuj pełny plik po każdym pomiarze.</div>
+    <div class="plist" id="plist"></div>
+    <p class="hint">Dane są zapisane tylko na tym urządzeniu, w tej przeglądarce. Telefon i komputer mają osobne kopie: przenosisz pomiar eksportem i importem pliku.</p>
+  </div>
+
+  <!-- EDYTOR -->
+  <div id="vEdit" hidden>
+    <div class="wrap" style="gap:16px">
+      <div class="tape" aria-hidden="true"></div>
+      <div class="topbar">
+        <button class="ghost small" id="btnBack" type="button">← Lista pomiarów</button>
+        <div class="actions">
+          <button class="small" id="btnPrint" type="button">Drukuj</button>
+        </div>
+      </div>
+      <h1 id="edTitle">Pomiar</h1>
+      <div class="banner warn" id="exampleBanner" hidden>To przykładowy pomiar do przetestowania aplikacji. Możesz go usunąć na dole strony.</div>
+
+      <div class="editor">
+        <div class="main">
+
+          <section class="step">
+            <div class="step-head"><span class="no">01</span><h2>Zlecenie</h2></div>
+            <div class="card">
+              <div class="grid wide">
+                <label class="f">Klient<input id="job-klient" data-p="job.klient" autocomplete="off"></label>
+                <label class="f">Telefon<input id="job-telefon" data-p="job.telefon" inputmode="tel" autocomplete="off"></label>
+                <label class="f">Adres<input id="job-adres" data-p="job.adres" autocomplete="off"></label>
+                <label class="f">Data pomiaru<input id="job-data" type="date" data-p="job.data"></label>
+                <label class="f">Rodzaj zabudowy<select id="job-typ" data-p="job.typ"><option>Kuchnia</option><option>Szafa / garderoba</option><option>Łazienka</option><option>Pokój / biuro</option><option>Inne</option></select></label>
+                <label class="f">Stan pomieszczenia<select id="job-stan" data-p="job.stan"><option>Gotowe (po płytkach i malowaniu)</option><option>Po tynkach, przed płytkami</option><option>Stan surowy</option></select></label>
+              </div>
+              <p class="hint">Klient, telefon i adres nie trafiają do pliku dla Claude.</p>
+              <div class="grid">
+                <label class="f">Sufit, lewa strona<div class="num"><input id="job-s1" inputmode="decimal" data-num data-p="job.s1"><span>mm</span></div></label>
+                <label class="f">Sufit, środek<div class="num"><input id="job-s2" inputmode="decimal" data-num data-p="job.s2"><span>mm</span></div></label>
+                <label class="f">Sufit, prawa strona<div class="num"><input id="job-s3" inputmode="decimal" data-num data-p="job.s3"><span>mm</span></div></label>
+                <label class="f">Planowana wys. blatu<div class="num"><input id="job-blat" inputmode="decimal" data-num data-p="job.blat"><span>mm</span></div></label>
+                <label class="f">Różnica poziomu podłogi<div class="num"><input id="job-podloga" inputmode="decimal" data-num data-p="job.podloga"><span>mm</span></div></label>
+              </div>
+              <div class="calc" id="calc-job"></div>
+            </div>
+          </section>
+
+          <section class="step">
+            <div class="step-head"><span class="no">02</span><h2>Ściany</h2></div>
+            <p class="hint">Każdą ścianę mierz trzy razy: tuż nad podłogą, na wysokości blatu i pod sufitem. Do projektu idzie najmniejszy wymiar. Pion to odchyłka poziomicą na całej wysokości.</p>
+            <div id="walls" class="main" style="gap:10px"></div>
+            <button class="small add" type="button" data-add="walls">Dodaj ścianę</button>
+          </section>
+
+          <section class="step">
+            <div class="step-head"><span class="no">03</span><h2>Narożniki</h2></div>
+            <p class="hint">Metoda 60–80–100: odmierz 600 mm na jednej ścianie i 800 mm na drugiej, zmierz przekątną między znakami. Kąt prosty daje 1000 mm.</p>
+            <div id="corners" class="main" style="gap:10px"></div>
+            <button class="small add" type="button" data-add="corners">Dodaj narożnik</button>
+          </section>
+
+          <section class="step">
+            <div class="step-head"><span class="no">04</span><h2>Okna, drzwi, przejścia</h2></div>
+            <p class="hint">Odległość od lewego narożnika ściany, patrząc na nią z wnętrza. Parapet od podłogi do górnej krawędzi parapetu.</p>
+            <div id="openings" class="main" style="gap:10px"></div>
+            <button class="small add" type="button" data-add="openings">Dodaj otwór</button>
+          </section>
+
+          <section class="step">
+            <div class="step-head"><span class="no">05</span><h2>Instalacje</h2></div>
+            <p class="hint">Środek przyłącza: od lewego narożnika ściany i od podłogi. Wpisz też grzejniki, kanały wentylacyjne i zawory.</p>
+            <div id="inst" class="main" style="gap:10px"></div>
+            <button class="small add" type="button" data-add="inst">Dodaj instalację</button>
+          </section>
+
+          <section class="step">
+            <div class="step-head"><span class="no">06</span><h2>AGD i życzenia klienta</h2></div>
+            <p class="hint">Zaznacz, co ma być w zabudowie, i wpisz model albo wymiar niszy od producenta.</p>
+            <div class="agd" id="agd"></div>
+            <div class="card">
+              <div class="grid wide">
+                <label class="f">Wzrost najwyższego użytkownika<div class="num"><input id="w-wzrost" inputmode="decimal" data-num data-p="wish.wzrost"><span>cm</span></div></label>
+                <label class="f">Fronty i kolory<input id="w-kolory" data-p="wish.kolory"></label>
+                <label class="f">Uchwyty / bezuchwytowe<input id="w-uchwyty" data-p="wish.uchwyty"></label>
+                <label class="f">Budżet klienta<input id="w-budzet" data-p="wish.budzet"></label>
+                <label class="f">Termin<input id="w-termin" data-p="wish.termin"></label>
+              </div>
+              <label class="f">Uwagi i życzenia<textarea id="w-uwagi" data-p="wish.uwagi"></textarea></label>
+              <p class="hint">Uwagi trafiają do pliku dla Claude. Nie wpisuj w nie nazwiska ani adresu.</p>
+            </div>
+          </section>
+
+          <section class="step">
+            <div class="step-head"><span class="no">07</span><h2>Zdjęcia</h2></div>
+            <p class="hint">Zdjęcia są zmniejszane do ok. 1600 px, żeby nie zapychać pamięci. Jeśli chcesz zachować oryginały, rób je zwykłym aparatem i dodawaj z galerii.</p>
+            <div class="actions">
+              <label class="btn">Zrób zdjęcie<input type="file" id="photoCam" accept="image/*" capture="environment"></label>
+              <label class="btn">Dodaj z galerii<input type="file" id="photoGal" accept="image/*" multiple></label>
+              <span class="status" id="photoStatus" role="status"></span>
+            </div>
+            <div class="photos" id="photos"></div>
+            <h3 style="font-size:16px">Lista kontrolna zdjęć</h3>
+            <div class="pchecks" id="pchecks"></div>
+          </section>
+
+          <section class="step no-print">
+            <div class="step-head"><span class="no">08</span><h2>Usuń pomiar</h2></div>
+            <div class="actions">
+              <button class="small danger" type="button" id="btnDel">Usuń ten pomiar z urządzenia</button>
+            </div>
+            <div class="banner crit" id="delBox" hidden>
+              <span>Usunąć pomiar razem ze zdjęciami? Jeśli nie ma eksportu, przepadnie na zawsze.</span>
+              <span class="actions"><button class="small danger" id="delYes" type="button">Tak, usuń</button><button class="small" id="delNo" type="button">Anuluj</button></span>
+            </div>
+          </section>
+        </div>
+
+        <aside class="side">
+          <div class="panel">
+            <div class="topbar"><h2>Do sprawdzenia</h2><div class="chips" id="chips"></div></div>
+            <ul class="checklist" id="checklist"></ul>
+          </div>
+          <div class="panel exp">
+            <h2>Eksport</h2>
+            <div class="banner" id="expState"></div>
+            <div class="actions">
+              <button class="primary" type="button" id="expFull">Plik dla mnie</button>
+              <button type="button" id="shareFull" hidden>Wyślij plik dla mnie</button>
+            </div>
+            <p class="hint">Pełne dane ze zdjęciami (.json). Zapisz na Dysku albo komputerze. Tym plikiem przenosisz pomiar między urządzeniami.</p>
+            <div class="actions">
+              <button type="button" id="expClaude">Plik dla Claude</button>
+              <button type="button" id="copyClaude">Kopiuj tekst</button>
+            </div>
+            <p class="hint">Same wymiary, bez klienta, telefonu, adresu i zdjęć. Zdjęcia do projektu dołączasz osobno, wybrane.</p>
+            <span class="status" id="expStatus" role="status"></span>
+          </div>
+          <div class="panel out no-print">
+            <h2>Podgląd pliku dla Claude</h2>
+            <textarea id="outText" readonly aria-label="Tekst dla Claude"></textarea>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="savebar no-print" id="savebar" hidden>
+  <span class="st" id="saveState">Zapisano</span>
+  <button class="small primary" type="button" id="barExport">Plik dla mnie</button>
+</div>
+<div class="viewer" id="viewer" hidden><img id="viewerImg" alt="Podgląd zdjęcia"></div>
+
+<script>
+(function(){
+'use strict';
+const APP='karta-pomiaru', FORMAT_VERSION=1;
+const AGD=['Płyta','Piekarnik','Kompakt / mikrofala','Lodówka','Zmywarka','Okap','Zlew','Bateria','Pralka / suszarka'];
+const PHOTOS=['Każda ściana na wprost','Narożniki od podłogi do sufitu','Przyłącza wody i odpływu','Gniazdka i włączniki','Grzejnik i zawory','Okna z parapetami','Sufit (belki, nadproża, zabudowy)','Podłoga przy ścianach'];
+const INST=['Woda + odpływ','Woda zimna','Woda ciepła','Odpływ','Gaz','Gniazdo 230 V','Gniazdo 400 V / osobny obwód','Włącznik','Punkt świetlny','Kanał wentylacyjny','Grzejnik','Inne'];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const has=v=>v!==''&&v!=null&&!isNaN(v);
+const pid=p=>p.replace(/\./g,'-');
+const now=()=>new Date().toISOString();
+const today=()=>new Date().toISOString().slice(0,10);
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const fmtDT=iso=>{if(!iso)return '—';const d=new Date(iso);return d.toLocaleDateString('pl-PL')+' '+d.toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'})};
+
+/* ---------- baza (IndexedDB) ---------- */
+let dbp=null;
+function db(){if(dbp)return dbp;dbp=new Promise((res,rej)=>{const r=indexedDB.open(APP,1);
+  r.onupgradeneeded=()=>r.result.createObjectStore('pomiary',{keyPath:'id'});
+  r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});return dbp}
+async function tx(mode,fn){const d=await db();return new Promise((res,rej)=>{const t=d.transaction('pomiary',mode);const st=t.objectStore('pomiary');let out;
+  const r=fn(st);if(r)r.onsuccess=()=>{out=r.result};t.oncomplete=()=>res(out);t.onerror=()=>rej(t.error)})}
+const dbAll=()=>tx('readonly',s=>s.getAll());
+const dbGet=id=>tx('readonly',s=>s.get(id));
+const dbPut=o=>tx('readwrite',s=>s.put(o));
+const dbDel=id=>tx('readwrite',s=>s.delete(id));
+
+/* ---------- model ---------- */
+function blank(){return{id:uid(),createdAt:now(),updatedAt:now(),exportedAt:null,example:false,
+  job:{klient:'',telefon:'',adres:'',data:today(),typ:'Kuchnia',stan:'Gotowe (po płytkach i malowaniu)',s1:'',s2:'',s3:'',blat:900,podloga:''},
+  walls:[{name:'Ściana A',dol:'',blat:'',gora:'',pion:'',uwagi:''},{name:'Ściana B',dol:'',blat:'',gora:'',pion:'',uwagi:''}],
+  corners:[{name:'A / B',przek:''}],openings:[],inst:[],
+  agd:AGD.map(n=>({n,jest:false,model:''})),
+  wish:{wzrost:'',kolory:'',uchwyty:'',budzet:'',termin:'',uwagi:''},
+  pchecks:PHOTOS.map(()=>false),photos:[]}}
+function example(){const s=blank();s.example=true;
+  s.job={klient:'Przykład',telefon:'',adres:'',data:today(),typ:'Kuchnia',stan:'Po tynkach, przed płytkami',s1:2604,s2:2598,s3:2611,blat:900,podloga:9};
+  s.walls=[{name:'N (okna)',dol:3400,blat:3402,gora:3397,pion:3,uwagi:''},{name:'E (zabudowa wysoka)',dol:3120,blat:3118,gora:3126,pion:6,uwagi:'za 3120 otwarcie do salonu'}];
+  s.corners=[{name:'N / E',przek:1003}];
+  s.openings=[{typ:'Okno',w:0,od:600,szer:900,wys:1400,par:950,otw:'Rozwierne do środka'},{typ:'Okno',w:0,od:1500,szer:900,wys:1400,par:950,otw:'Rozwierne do środka'}];
+  s.inst=[{typ:'Woda + odpływ',w:0,od:1480,pod:450,uwagi:''},{typ:'Grzejnik',w:0,od:950,pod:150,uwagi:'szer. 1000, pod oknami'},{typ:'Kanał wentylacyjny',w:1,od:2900,pod:2400,uwagi:''}];
+  s.agd.forEach(a=>{if(['Płyta','Piekarnik','Lodówka','Zmywarka','Zlew'].includes(a.n))a.jest=true});
+  s.agd[0].model='indukcja 80 cm, model nieznany';s.agd[1].model='Bosch HBG7741B1';
+  s.wish={wzrost:185,kolory:'ciemny dąb + jasny kamień',uchwyty:'frezowane',budzet:'ok. 40 tys.',termin:'przed świętami',uwagi:'wyspa z płytą, bez hokerów'};
+  return s}
+function normalize(p){const b=blank();for(const k of Object.keys(b))if(p[k]===undefined)p[k]=b[k];
+  for(const k of Object.keys(b.job))if(p.job[k]===undefined)p.job[k]=b.job[k];
+  for(const k of Object.keys(b.wish))if(p.wish[k]===undefined)p.wish[k]=b.wish[k];
+  if(!Array.isArray(p.pchecks)||p.pchecks.length!==PHOTOS.length)p.pchecks=PHOTOS.map((_,i)=>!!(p.pchecks&&p.pchecks[i]));
+  return p}
+
+let S=null;
+function get(p){return p.split('.').reduce((o,k)=>o==null?undefined:o[k],S)}
+function set(p,v){const ks=p.split('.');let o=S;for(let i=0;i<ks.length-1;i++)o=o[ks[i]];o[ks[ks.length-1]]=v}
+
+/* ---------- zapis ---------- */
+let saveT=null;
+function touch(){S.updatedAt=now();if(S.example)S.example=false;$('exampleBanner').hidden=true;$('saveState').textContent='Zapisywanie…';clearTimeout(saveT);saveT=setTimeout(saveNow,400)}
+async function saveNow(){clearTimeout(saveT);if(!S)return;try{await dbPut(S);$('saveState').textContent='Zapisano na urządzeniu · '+fmtDT(S.updatedAt);persist()}
+  catch(e){$('saveState').textContent='Błąd zapisu: brak miejsca? Zrób eksport.'}renderExpState()}
+let persistAsked=false;
+async function persist(){if(persistAsked||!navigator.storage||!navigator.storage.persist)return;persistAsked=true;
+  try{const ok=await navigator.storage.persisted()||await navigator.storage.persist();$('storageWarn').hidden=ok}catch(e){}}
+
+/* ---------- formularz ---------- */
+const num=(l,p,u='mm')=>`<label class="f">${l}<div class="num"><input id="${pid(p)}" inputmode="decimal" data-num data-p="${p}"><span>${u}</span></div></label>`;
+const txt=(l,p)=>`<label class="f">${l}<input id="${pid(p)}" data-p="${p}" autocomplete="off"></label>`;
+const sel=(l,p,o)=>`<label class="f">${l}<select id="${pid(p)}" data-p="${p}">${o.map(x=>`<option>${esc(x)}</option>`).join('')}</select></label>`;
+const wallOpts=(blank)=>(blank?'<option value="">—</option>':'')+S.walls.map((w,i)=>`<option value="${i}">${esc(w.name||('Ściana '+(i+1)))}</option>`).join('');
+const wallSel=(l,p,b)=>`<label class="f">${l}<select id="${pid(p)}" data-p="${p}" data-num data-wallsel${b?' data-blank':''}>${wallOpts(b)}</select></label>`;
+const head=(list,i,p)=>`<div class="card-head"><input class="name" id="${pid(p)}" data-p="${p}" aria-label="Nazwa"><button class="small ghost danger" type="button" data-del="${list}" data-i="${i}">Usuń</button></div>`;
+const head2=(list,i,t)=>`<div class="card-head"><strong>${esc(t)}</strong><button class="small ghost danger" type="button" data-del="${list}" data-i="${i}">Usuń</button></div>`;
+
+function renderWalls(){$('walls').innerHTML=S.walls.map((w,i)=>`<div class="card">${head('walls',i,`walls.${i}.name`)}
+  <div class="grid">${num('Przy podłodze',`walls.${i}.dol`)}${num('Na wys. blatu',`walls.${i}.blat`)}${num('Pod sufitem',`walls.${i}.gora`)}${num('Odchyłka od pionu',`walls.${i}.pion`)}</div>
+  ${txt('Uwagi',`walls.${i}.uwagi`)}<div class="calc" id="calc-wall-${i}"></div></div>`).join('')}
+function renderCorners(){$('corners').innerHTML=S.corners.map((c,i)=>`<div class="card">${head('corners',i,`corners.${i}.name`)}
+  <div class="grid">${num('Przekątna 60–80',`corners.${i}.przek`)}</div><div class="calc" id="calc-corner-${i}"></div></div>`).join('')}
+function renderOpenings(){$('openings').innerHTML=S.openings.map((o,i)=>`<div class="card">${head2('openings',i,o.typ+' '+(i+1))}
+  <div class="grid">${sel('Rodzaj',`openings.${i}.typ`,['Okno','Drzwi','Przejście / otwarcie'])}${wallSel('Ściana',`openings.${i}.w`)}${num('Od lewego narożnika',`openings.${i}.od`)}${num('Szerokość',`openings.${i}.szer`)}${num('Wysokość',`openings.${i}.wys`)}${num('Parapet od podłogi',`openings.${i}.par`)}${sel('Otwieranie',`openings.${i}.otw`,['Rozwierne do środka','Tylko uchylne','Na zewnątrz / przesuwne','Nie dotyczy'])}</div>
+  <div class="calc" id="calc-open-${i}"></div></div>`).join('')}
+function renderInst(){$('inst').innerHTML=S.inst.map((o,i)=>`<div class="card">${head2('inst',i,'Instalacja '+(i+1))}
+  <div class="grid">${sel('Rodzaj',`inst.${i}.typ`,INST)}${wallSel('Ściana',`inst.${i}.w`)}${num('Od lewego narożnika',`inst.${i}.od`)}${num('Od podłogi',`inst.${i}.pod`)}</div>${txt('Uwagi',`inst.${i}.uwagi`)}</div>`).join('')}
+function renderAgd(){$('agd').innerHTML=S.agd.map((a,i)=>`<div class="agd-row"><label class="tick"><input type="checkbox" id="agd-${i}-jest" data-p="agd.${i}.jest">${esc(a.n)}</label><input id="agd-${i}-model" data-p="agd.${i}.model" placeholder="model lub wymiar niszy" aria-label="${esc(a.n)}: model"></div>`).join('')}
+function renderPchecks(){$('pchecks').innerHTML=PHOTOS.map((p,i)=>`<label class="tick"><input type="checkbox" id="pc-${i}" data-p="pchecks.${i}">${esc(p)}</label>`).join('')}
+function renderPhotos(){$('photos').innerHTML=S.photos.map((ph,i)=>`<figure class="photo" style="margin:0"><img src="${ph.data}" alt="${esc(ph.opis||'Zdjęcie '+(i+1))}" data-view="${i}" loading="lazy">
+  <div class="pbody">${wallSel('Ściana',`photos.${i}.w`,true)}<input id="photos-${i}-opis" data-p="photos.${i}.opis" placeholder="opis, np. odpływ pod oknem" aria-label="Opis zdjęcia">
+  <button class="small ghost danger" type="button" data-del="photos" data-i="${i}">Usuń zdjęcie</button></div></figure>`).join('')}
+
+function fill(root){root.querySelectorAll('[data-p]').forEach(el=>{const v=get(el.dataset.p);if(el.type==='checkbox')el.checked=!!v;else el.value=(v??'')})}
+function renderAll(){renderWalls();renderCorners();renderOpenings();renderInst();renderAgd();renderPchecks();renderPhotos();fill(document.getElementById('vEdit'));
+  $('exampleBanner').hidden=!S.example;$('edTitle').textContent=S.job.klient||'Nowy pomiar';$('saveState').textContent='Zapisano na urządzeniu · '+fmtDT(S.updatedAt);update()}
+function refreshWallSelects(){document.querySelectorAll('[data-wallsel]').forEach(s=>{const c=s.value;s.innerHTML=wallOpts('blank' in s.dataset);s.value=c})}
+
+/* ---------- obliczenia i kontrole ---------- */
+function wallLen(w){const v=[w.dol,w.blat,w.gora].filter(has).map(Number);return v.length?{min:Math.min(...v),max:Math.max(...v)}:null}
+function corner(c){if(!has(c.przek))return null;const m=+c.przek,a=600,b=800;const cos=(a*a+b*b-m*m)/(2*a*b);if(cos<-1||cos>1)return{bad:true};
+  const deg=Math.acos(cos)*180/Math.PI,d=Math.abs(deg-90)*Math.PI/180;return{deg,o600:600*Math.tan(d),o3000:3000*Math.tan(d)}}
+const wname=i=>(i===''||i==null)?'—':(S.walls[i]?.name||('Ściana '+(+i+1)));
+const r0=n=>Math.round(n);
+function checks(){const L=[],J=S.job;
+  if(/przed|surowy/i.test(J.stan))L.push(['crit','Pomiar przed płytkami lub tynkiem. Każdy wymiar zmniejszy się o grubość okładzin. Umów pomiar kontrolny przed rozkrojem.']);
+  const sv=[J.s1,J.s2,J.s3].filter(has).map(Number);
+  if(sv.length>=2&&Math.max(...sv)-Math.min(...sv)>10)L.push(['warn',`Sufit różni się o ${Math.max(...sv)-Math.min(...sv)} mm. Zabudowę pod sufit licz od najniższego punktu (${Math.min(...sv)} mm) i daj blendę górną.`]);
+  if(!sv.length)L.push(['info','Brak wysokości sufitu.']);
+  if(has(J.podloga)&&+J.podloga>15)L.push(['warn',`Podłoga różni się o ${J.podloga} mm. Sprawdź zakres regulacji nóżek i wysokość cokołu.`]);
+  S.walls.forEach((w,i)=>{const l=wallLen(w);if(!l){L.push(['info',`${wname(i)}: brak długości.`]);return}
+    if(l.max-l.min>5)L.push(['warn',`${wname(i)}: długość różni się o ${l.max-l.min} mm między dołem a górą. Do projektu bierz ${l.min} mm i zaplanuj blendę do docięcia.`]);
+    if(has(w.pion)&&+w.pion>5)L.push(['warn',`${wname(i)}: odchyłka od pionu ${w.pion} mm. Wysokie szafki przy tej ścianie potrzebują blendy.`])});
+  S.corners.forEach(c=>{const r=corner(c);if(!r)return;if(r.bad){L.push(['crit',`Narożnik ${c.name}: przekątna ${c.przek} mm jest niemożliwa dla 600 i 800. Zmierz ponownie.`]);return}
+    if(r.o600>3)L.push(['warn',`Narożnik ${c.name}: kąt ${r.deg.toFixed(1)}°. Na głębokości 600 mm to ${r0(r.o600)} mm szczeliny, na 3 m blatu ${r0(r.o3000)} mm. Blat docinany z szablonu.`])});
+  S.openings.forEach((o,i)=>{const n=`${o.typ} ${i+1} (${wname(o.w)})`;const w=S.walls[o.w];const l=w&&wallLen(w);
+    if(l&&has(o.od)&&has(o.szer)&&(+o.od + +o.szer>l.min))L.push(['crit',`${n}: wychodzi poza ścianę (${+o.od + +o.szer} > ${l.min} mm). Sprawdź pomiar.`]);
+    if(o.typ==='Okno'&&has(o.par)&&has(J.blat)){const p=+o.par,b=+J.blat;
+      if(p<b+10)L.push(['crit',`${n}: parapet ${p} mm jest na wysokości blatu lub niżej (${b} mm). Blat pod oknem wymaga docięcia parapetu albo obniżenia.`]);
+      else if(o.otw==='Rozwierne do środka'&&p<b+350)L.push(['warn',`${n}: parapet tylko ${p-b} mm nad blatem, a skrzydło otwiera się do środka. Bateria pod tym oknem zablokuje skrzydło. Daj baterię niską lub składaną albo przesuń zlew.`])}});
+  S.inst.forEach(o=>{const w=S.walls[o.w];const l=w&&wallLen(w);const n=`${o.typ} (${wname(o.w)})`;
+    if(l&&has(o.od)&&+o.od>l.min)L.push(['crit',`${n}: położenie ${o.od} mm jest dalej niż długość ściany.`]);
+    if(o.typ==='Grzejnik')L.push(['warn',`${n}: szafki przed grzejnikiem. Ustal z klientem przeniesienie albo kratki wentylacyjne w cokole i blacie.`]);
+    if(o.typ==='Gaz')L.push(['warn',`${n}: zawór gazu musi zostać dostępny. Zaplanuj otwór rewizyjny.`])});
+  if(J.typ==='Kuchnia'&&!S.inst.some(o=>/Woda|Odpływ/.test(o.typ)))L.push(['crit','Brak przyłącza wody i odpływu. Bez tego nie da się ustawić zlewu.']);
+  const pl=S.agd.find(a=>a.n==='Płyta');
+  if(pl&&pl.jest&&/induk/i.test(pl.model)&&!S.inst.some(o=>/400|obwód/.test(o.typ)))L.push(['warn','Płyta indukcyjna, a nie wpisano osobnego obwodu. Sprawdź zasilanie płyty.']);
+  const nm=S.agd.filter(a=>a.jest&&(!a.model||/nieznany|\?/.test(a.model))).map(a=>a.n);
+  if(nm.length)L.push(['warn',`Brak modelu: ${nm.join(', ')}. Bez modelu wymiary niszy są zgadywane.`]);
+  if(!S.photos.length)L.push(['info','Brak zdjęć w pomiarze.']);
+  const miss=S.pchecks.filter(x=>!x).length;if(miss)L.push(['info',`Lista zdjęć: brakuje ${miss} z ${PHOTOS.length}.`]);
+  return L}
+function calcs(){const J=S.job,sv=[J.s1,J.s2,J.s3].filter(has).map(Number);
+  $('calc-job').innerHTML=sv.length?`Sufit do projektu: <b>${Math.min(...sv)} mm</b>`:'';
+  S.walls.forEach((w,i)=>{const el=$('calc-wall-'+i);if(!el)return;const l=wallLen(w);el.innerHTML=l?`Do projektu: <b>${l.min} mm</b>${l.max-l.min?` · rozrzut ${l.max-l.min} mm`:''}`:''});
+  S.corners.forEach((c,i)=>{const el=$('calc-corner-'+i);if(!el)return;const r=corner(c);el.innerHTML=!r?'':r.bad?'Przekątna poza zakresem':`Kąt <b>${r.deg.toFixed(1)}°</b> · na 600 mm: ${r0(r.o600)} mm · na 3 m: ${r0(r.o3000)} mm`});
+  S.openings.forEach((o,i)=>{const el=$('calc-open-'+i);if(!el)return;el.innerHTML=has(o.od)&&has(o.szer)?`Zajmuje od <b>${o.od}</b> do <b>${+o.od + +o.szer} mm</b>${o.typ==='Okno'&&has(o.par)&&has(S.job.blat)?` · parapet ${+o.par-S.job.blat>=0?'+':''}${+o.par-S.job.blat} mm nad blatem`:''}`:''})}
+
+/* ---------- tekst dla Claude (bez danych osobowych) ---------- */
+const v=x=>has(x)?x:'—';
+function claudeText(L){const J=S.job,t=[];
+  t.push(`POMIAR ${S.id} · ${J.typ} · ${J.data||'—'}`);
+  t.push(`Stan: ${J.stan}. Sufit: ${v(J.s1)} / ${v(J.s2)} / ${v(J.s3)} mm. Blat: ${v(J.blat)} mm. Różnica podłogi: ${v(J.podloga)} mm.`);
+  t.push('','ŚCIANY (dół / blat / góra, pion):');
+  S.walls.forEach((w,i)=>{const l=wallLen(w);t.push(`- ${wname(i)}: ${v(w.dol)} / ${v(w.blat)} / ${v(w.gora)} mm, pion ${v(w.pion)} mm${l?` → do projektu ${l.min}`:''}${w.uwagi?` (${w.uwagi})`:''}`)});
+  if(S.corners.length){t.push('','NAROŻNIKI (60–80–100):');S.corners.forEach(c=>{const r=corner(c);t.push(`- ${c.name}: przekątna ${v(c.przek)} mm${r&&!r.bad?` → ${r.deg.toFixed(1)}°`:''}`)})}
+  if(S.openings.length){t.push('','OTWORY (od lewego narożnika):');S.openings.forEach((o,i)=>t.push(`- ${o.typ} ${i+1}, ${wname(o.w)}: od ${v(o.od)}, szer. ${v(o.szer)}, wys. ${v(o.wys)}, parapet ${v(o.par)} mm, ${o.otw}`))}
+  if(S.inst.length){t.push('','INSTALACJE (od lewego narożnika / od podłogi):');S.inst.forEach(o=>t.push(`- ${o.typ}, ${wname(o.w)}: ${v(o.od)} / ${v(o.pod)} mm${o.uwagi?` (${o.uwagi})`:''}`))}
+  const a=S.agd.filter(x=>x.jest);if(a.length){t.push('','AGD:');a.forEach(x=>t.push(`- ${x.n}: ${x.model||'brak modelu'}`))}
+  const W=S.wish;t.push('','ŻYCZENIA:',`Wzrost: ${v(W.wzrost)} cm. Fronty: ${W.kolory||'—'}. Uchwyty: ${W.uchwyty||'—'}. Budżet: ${W.budzet||'—'}. Termin: ${W.termin||'—'}.`);if(W.uwagi)t.push(`Uwagi: ${W.uwagi}`);
+  if(S.photos.length){t.push('','ZDJĘCIA W POMIARZE (dołączam wybrane osobno):');S.photos.forEach((p,i)=>t.push(`- ${i+1}. ${wname(p.w)}${p.opis?': '+p.opis:''}`))}
+  const imp=L.filter(x=>x[0]!=='info');if(imp.length){t.push('','KONTROLE:');imp.forEach(x=>t.push(`- [${x[0]==='crit'?'KRYTYCZNE':'UWAGA'}] ${x[1]}`))}
+  return t.join('\n')}
+
+function update(){const L=checks();calcs();
+  const c=L.filter(x=>x[0]==='crit').length,w=L.filter(x=>x[0]==='warn').length;
+  $('chips').innerHTML=(c?`<span class="chip crit">${c} krytyczne</span>`:'')+(w?`<span class="chip warn">${w} uwagi</span>`:'')+(!c&&!w?'<span class="chip ok">bez uwag</span>':'');
+  const nm={crit:'Krytyczne',warn:'Uwaga',info:'Brakuje'};
+  $('checklist').innerHTML=L.length?L.map(x=>`<li><span class="lvl ${x[0]}">${nm[x[0]]}</span><p>${esc(x[1])}</p></li>`).join(''):'<li><span class="lvl ok">OK</span><p>Wszystkie kontrole przeszły.</p></li>';
+  $('outText').value=claudeText(L);renderExpState()}
+function renderExpState(){if(!S)return;const el=$('expState');const fresh=S.exportedAt&&S.exportedAt>=S.updatedAt;
+  el.className='banner '+(fresh?'ok':'warn');
+  el.textContent=fresh?`Pełny plik aktualny (eksport ${fmtDT(S.exportedAt)}).`:S.exportedAt?`Zmiany po ostatnim eksporcie (${fmtDT(S.exportedAt)}). Zrób nowy plik.`:'Ten pomiar nie ma jeszcze kopii w pliku.'}
+
+/* ---------- zdarzenia edycji ---------- */
+function onEdit(e){const el=e.target,p=el.dataset&&el.dataset.p;if(!p||!S)return;
+  let val=el.type==='checkbox'?el.checked:('num' in el.dataset?(el.value===''?'':Number(String(el.value).replace(',','.'))):el.value);
+  if('num' in el.dataset&&val!==''&&isNaN(val))return;
+  if(get(p)===val)return;set(p,val);
+  if(/^walls\.\d+\.name$/.test(p))refreshWallSelects();
+  if(/^openings\.\d+\.typ$/.test(p)){renderOpenings();fill($('openings'))}
+  if(p==='job.klient')$('edTitle').textContent=val||'Nowy pomiar';
+  touch();update()}
+document.addEventListener('input',onEdit);document.addEventListener('change',onEdit);
+
+const DEF={walls:()=>({name:'Ściana '+String.fromCharCode(65+S.walls.length),dol:'',blat:'',gora:'',pion:'',uwagi:''}),
+  corners:()=>({name:'Narożnik '+(S.corners.length+1),przek:''}),
+  openings:()=>({typ:'Okno',w:0,od:'',szer:'',wys:'',par:'',otw:'Rozwierne do środka'}),
+  inst:()=>({typ:'Woda + odpływ',w:0,od:'',pod:'',uwagi:''})};
+const R={walls:()=>{renderWalls();renderOpenings();renderInst();renderPhotos()},corners:renderCorners,openings:renderOpenings,inst:renderInst,photos:renderPhotos};
+document.addEventListener('click',e=>{
+  const img=e.target.closest('[data-view]');if(img){$('viewerImg').src=S.photos[+img.dataset.view].data;$('viewer').hidden=false;return}
+  const b=e.target.closest('button');if(!b||!S)return;
+  if(b.dataset.add){S[b.dataset.add].push(DEF[b.dataset.add]());R[b.dataset.add]();fill($('vEdit'));touch();update()}
+  if(b.dataset.del){const k=b.dataset.del,i=+b.dataset.i;S[k].splice(i,1);
+    if(k==='walls')[...S.openings,...S.inst,...S.photos].forEach(o=>{if(o.w==='')return;if(+o.w===i)o.w=(k==='walls'&&S.photos.includes(o))?'':0;else if(+o.w>i)o.w=+o.w-1});
+    R[k]();fill($('vEdit'));touch();update()}});
+$('viewer').addEventListener('click',()=>{$('viewer').hidden=true;$('viewerImg').src=''});
+
+/* ---------- zdjęcia ---------- */
+async function compress(file){const MAX=1600;let src,w,h;
+  try{src=await createImageBitmap(file,{imageOrientation:'from-image'});w=src.width;h=src.height}
+  catch(e){src=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(file)});w=src.naturalWidth;h=src.naturalHeight}
+  const k=Math.min(1,MAX/Math.max(w,h));const c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);
+  c.getContext('2d').drawImage(src,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.8)}
+async function addPhotos(files){const st=$('photoStatus');let n=0;
+  for(const f of files){st.textContent=`Dodawanie zdjęcia ${++n} z ${files.length}…`;
+    try{S.photos.push({id:uid(),data:await compress(f),w:'',opis:'',at:now()})}catch(e){st.textContent='Nie udało się wczytać zdjęcia '+f.name}}
+  renderPhotos();fill($('photos'));touch();update();await saveNow();st.textContent=`Dodano ${files.length} zdj.`}
+['photoCam','photoGal'].forEach(id=>$(id).addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';if(f.length)addPhotos(f)}));
+
+/* ---------- eksport / import ---------- */
+const slug=s=>(s||'pomiar').normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ł/g,'l').replace(/Ł/g,'L').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)||'pomiar';
+function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}
+function fullFile(){const out=JSON.parse(JSON.stringify(S));out.exportedAt=now();
+  const blob=new Blob([JSON.stringify({format:APP,version:FORMAT_VERSION,pomiar:out})],{type:'application/json'});
+  return {blob,name:`pomiar_${slug(S.job.klient)}_${S.job.data||today()}.json`,at:out.exportedAt}}
+async function markExported(at){S.exportedAt=at;await saveNow();renderExpState()}
+async function expFull(){await saveNow();const f=fullFile();download(f.blob,f.name);await markExported(f.at);$('expStatus').textContent='Zapisano plik '+f.name}
+$('expFull').addEventListener('click',expFull);$('barExport').addEventListener('click',expFull);
+const canShareFiles=(()=>{try{return !!(navigator.canShare&&navigator.canShare({files:[new File(['x'],'x.json',{type:'application/json'})]}))}catch(e){return false}})();
+$('shareFull').hidden=!canShareFiles;
+$('shareFull').addEventListener('click',async()=>{await saveNow();const f=fullFile();const file=new File([f.blob],f.name,{type:'application/json'});
+  try{await navigator.share({files:[file],title:f.name});await markExported(f.at);$('expStatus').textContent='Wysłano '+f.name}
+  catch(e){if(e&&e.name!=='AbortError')$('expStatus').textContent='Nie udało się wysłać. Użyj „Plik dla mnie”.'}});
+$('expClaude').addEventListener('click',()=>{download(new Blob([$('outText').value],{type:'text/plain'}),`pomiar_${S.id}_dla_Claude.txt`);$('expStatus').textContent='Zapisano plik dla Claude (bez danych osobowych).'});
+$('copyClaude').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('outText').value);$('expStatus').textContent='Skopiowano tekst dla Claude.'}
+  catch(e){$('outText').focus();$('outText').select();$('expStatus').textContent='Tekst zaznaczony, skopiuj ręcznie.'}});
+$('btnPrint').addEventListener('click',()=>window.print());
+
+let pending=null;
+$('importFile').addEventListener('change',async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const box=$('importBox');
+  try{const d=JSON.parse(await f.text());if(d.format!==APP||!d.pomiar||!d.pomiar.id)throw new Error('format');
+    const p=normalize(d.pomiar);const ex=await dbGet(p.id);
+    if(ex&&ex.updatedAt>p.updatedAt){pending=p;box.className='banner crit';box.hidden=false;
+      box.innerHTML=`<span>Na tym urządzeniu jest <b>nowsza</b> wersja pomiaru „${esc(p.job.klient||'bez nazwy')}” (${fmtDT(ex.updatedAt)}) niż w pliku (${fmtDT(p.updatedAt)}). Nadpisać nowszą starszą?</span><span class="actions"><button class="small danger" id="impYes" type="button">Tak, nadpisz</button><button class="small" id="impNo" type="button">Anuluj</button></span>`;
+      $('impYes').onclick=async()=>{await dbPut(pending);pending=null;box.hidden=true;renderList()};$('impNo').onclick=()=>{pending=null;box.hidden=true};return}
+    await dbPut(p);box.className='banner ok';box.hidden=false;box.textContent=`Zaimportowano „${p.job.klient||'bez nazwy'}”${ex?' (zaktualizowano istniejący)':''}.`;renderList()}
+  catch(err){box.className='banner crit';box.hidden=false;box.textContent='Ten plik nie jest eksportem karty pomiaru. Wybierz plik zapisany przyciskiem „Plik dla mnie”.'}});
+
+/* ---------- widoki ---------- */
+async function renderList(){const all=(await dbAll()).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));const el=$('plist');
+  if(!all.length){el.innerHTML='<div class="empty">Brak pomiarów. Zacznij od „Nowy pomiar” albo zaimportuj plik z innego urządzenia.</div>';return}
+  el.innerHTML=all.map(p=>{const fresh=p.exportedAt&&p.exportedAt>=p.updatedAt;
+    return `<button class="pitem" type="button" data-open="${p.id}"><strong>${esc(p.job.klient||'Bez nazwy')}${p.example?' <span class="muted">(przykład)</span>':''}</strong>
+    <span class="chip ${fresh?'ok':'warn'}">${fresh?'w pliku':'bez kopii'}</span>
+    <span class="meta">${esc(p.job.typ)} · pomiar ${esc(p.job.data||'—')} · zmiana ${fmtDT(p.updatedAt)} · zdj. ${p.photos.length}</span></button>`}).join('')}
+$('plist').addEventListener('click',async e=>{const b=e.target.closest('[data-open]');if(!b)return;const p=await dbGet(b.dataset.open);if(p)openEdit(normalize(p))});
+function openEdit(p){S=p;$('vList').hidden=true;$('vEdit').hidden=false;$('savebar').hidden=false;$('delBox').hidden=true;$('expStatus').textContent='';renderAll();window.scrollTo(0,0);location.hash='edycja'}
+async function showList(){await saveNow();S=null;$('vEdit').hidden=true;$('savebar').hidden=true;$('vList').hidden=false;$('importBox').hidden=true;await renderList();window.scrollTo(0,0);if(location.hash)history.replaceState(null,'',location.pathname)}
+$('btnBack').addEventListener('click',showList);
+window.addEventListener('hashchange',()=>{if(!location.hash&&S)showList()});
+$('btnNew').addEventListener('click',async()=>{const p=blank();await dbPut(p);openEdit(p)});
+$('btnDel').addEventListener('click',()=>{$('delBox').hidden=false});
+$('delNo').addEventListener('click',()=>{$('delBox').hidden=true});
+$('delYes').addEventListener('click',async()=>{clearTimeout(saveT);const id=S.id;S=null;await dbDel(id);$('vEdit').hidden=true;$('savebar').hidden=true;$('vList').hidden=false;await renderList()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')saveNow()});
+
+/* ---------- start ---------- */
+(async function init(){
+  try{let seeded=false;try{seeded=localStorage.getItem(APP+'-seeded')==='1'}catch(e){}
+    if(!seeded&&!(await dbAll()).length){await dbPut(example())}
+    try{localStorage.setItem(APP+'-seeded','1')}catch(e){}
+    await renderList();
+    if(navigator.storage&&navigator.storage.persisted){navigator.storage.persisted().then(ok=>{$('storageWarn').hidden=ok}).catch(()=>{})}
+  }catch(e){$('plist').innerHTML='<div class="empty">Ta przeglądarka nie pozwala zapisywać danych (tryb prywatny?). Otwórz aplikację w zwykłym oknie Chrome.</div>'}
+  if('serviceWorker' in navigator&&location.protocol!=='file:'){navigator.serviceWorker.register('sw.js').catch(()=>{})}
+})();
+})();
+</script>
+</body>
+</html>
